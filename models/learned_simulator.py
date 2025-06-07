@@ -160,7 +160,7 @@ class LearnedSimulator(tf.keras.Model):
         self.one_step_mse.update_state(target_pos, pred_pos)
 
         return {
-            "one_step_mse": self.one_step_mse.result()
+            "loss": self.one_step_mse.result()
         }
 
     def rollout(
