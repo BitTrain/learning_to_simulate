@@ -53,8 +53,8 @@ class LearnedSimulator(tf.keras.Model):
         )
 
         # Metrics
-        self.mse_loss = tf.keras.metrics.MeanSquaredError(name="mse_loss")
-        self.one_step_mse = tf.keras.metrics.MeanSquaredError(name="one_step_mse")
+        self.acc_mse = tf.keras.metrics.MeanSquaredError(name="acc_mse")
+        self.step_mse = tf.keras.metrics.MeanSquaredError(name="step_mse")
         self.rollout_mse = tf.keras.metrics.MeanSquaredError(name="rollout_mse")
 
     def get_config(self):
@@ -84,7 +84,7 @@ class LearnedSimulator(tf.keras.Model):
 
     @property
     def metrics(self):
-        return [self.mse_loss, self.one_step_mse, self.rollout_mse]
+        return [self.acc_mse, self.step_mse, self.rollout_mse]
 
     def call(
         self,
@@ -135,11 +135,9 @@ class LearnedSimulator(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         # Update metrics
-        self.mse_loss.update_state(target_acc.flat_values, pred_acc)
+        self.acc_mse.update_state(target_acc.flat_values, pred_acc)
 
-        return {
-            "loss": self.mse_loss.result()
-        }
+        return { "loss": self.acc_mse.result() }
 
     def test_step(
         self,
@@ -153,16 +151,22 @@ class LearnedSimulator(tf.keras.Model):
         target_pos = positions[..., -1, :]
         positions = positions[..., :-1, :]
 
-        # Get predicted next position and compute error
+        # Get predicted acceleration and compute error
         pred_acc = self(inputs)
+        target_acc = self._differentiate_position(
+            positions, 
+            target_pos
+        )
+        self.acc_mse.update_state(target_acc.flat_values, pred_acc)
+
+        # Get predicted next position and compute error
         pred_acc = tf.RaggedTensor.from_row_splits(pred_acc, num_particles)
         pred_pos = self._integrate_acceleration(positions, pred_acc)
-
-        # Update metrics
-        self.one_step_mse.update_state(target_pos.flat_values, pred_pos.flat_values)
+        self.step_mse.update_state(target_pos.flat_values, pred_pos.flat_values)
 
         return {
-            "loss": self.one_step_mse.result()
+            "loss": self.acc_mse.result(),
+            "err": self.step_mse.result()
         }
 
     def rollout(
