@@ -88,7 +88,7 @@ class LearnedSimulator(tf.keras.Model):
 
     def call(
         self,
-        inputs:   Mapping[str, tf.Tensor],
+        inputs:   Mapping[str, tf.Tensor | tf.RaggedTensor],
         training: bool=False
     ) -> tf.Tensor:
         """Forward pass of the model, producing normalized accelerations."""
@@ -98,7 +98,7 @@ class LearnedSimulator(tf.keras.Model):
 
         if settings.TF_DEBUG_MODE:
             self._check_tensor_inputs(positions, particle_type, global_context)
-
+            
         input_graph = self._build_graph_tensor(positions, particle_type, global_context)
         norm_acc = self._gnn(input_graph, training)
 
@@ -106,7 +106,7 @@ class LearnedSimulator(tf.keras.Model):
     
     def train_step(
         self,
-        inputs: Mapping[str, tf.Tensor]
+        inputs: Mapping[str, tf.Tensor | tf.RaggedTensor]
     ) -> Mapping[str, tf.Tensor]:
         """One-step training."""
         positions = inputs["positions"]
@@ -118,8 +118,8 @@ class LearnedSimulator(tf.keras.Model):
         positions += position_noise
 
         # Split off last step as target
-        target_pos = positions[:, -1, :]
-        positions = positions[:, :-1, :]
+        target_pos = positions[..., -1, :]
+        positions = positions[..., :-1, :]
 
         # Get predicted and target normalized acceleration and compute loss
         with tf.GradientTape() as tape:
@@ -128,36 +128,38 @@ class LearnedSimulator(tf.keras.Model):
                 positions, 
                 target_pos
             )
-            loss_acc = tf.reduce_mean(tf.square(target_acc - pred_acc))
+            loss_acc = tf.reduce_mean(tf.square(target_acc.flat_values - pred_acc))
 
         # Backprop
         gradients = tape.gradient(loss_acc, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         # Update metrics
-        self.mse_loss.update_state(target_acc, pred_acc)
+        self.mse_loss.update_state(target_acc.flat_values, pred_acc)
 
         return {
-            "mse_loss": self.mse_loss.result()
+            "loss": self.mse_loss.result()
         }
 
     def test_step(
         self,
-        inputs: Mapping[str, tf.Tensor]
+        inputs: Mapping[str, tf.Tensor | tf.RaggedTensor]
     ) -> Mapping[str, tf.Tensor]:
         """One-step evaluation."""
         positions = inputs["positions"]
+        num_particles = positions.row_splits
 
         # Split off last step as target
-        target_pos = positions[:, -1, :]
-        positions = positions[:, :-1, :]
+        target_pos = positions[..., -1, :]
+        positions = positions[..., :-1, :]
 
-        # Get predicted next position
+        # Get predicted next position and compute error
         pred_acc = self(inputs)
+        pred_acc = tf.RaggedTensor.from_row_splits(pred_acc, num_particles)
         pred_pos = self._integrate_acceleration(positions, pred_acc)
 
         # Update metrics
-        self.one_step_mse.update_state(target_pos, pred_pos)
+        self.one_step_mse.update_state(target_pos.flat_values, pred_pos.flat_values)
 
         return {
             "loss": self.one_step_mse.result()
@@ -188,7 +190,9 @@ class LearnedSimulator(tf.keras.Model):
                 inputs["global_context"] = global_contexts[step + num_seed - 1][tf.newaxis]
 
             # Update positions
+            inputs["positions"] = seed_pos
             pred_acc = self(inputs)
+            pred_acc = tf.reshape(pred_acc, tf.shape(seed_pos[..., -1, :]))  # Restore batch dims
             next_pos = tf.where(
                 is_static,
                 ground_truth_pos[..., step, :],  # Use frozen ground truth for static particles
@@ -236,19 +240,27 @@ class LearnedSimulator(tf.keras.Model):
     
     def _check_tensor_inputs(
         self,
-        positions:      tf.Tensor,
-        particle_type:  tf.Tensor,
+        positions:      tf.Tensor | tf.RaggedTensor,
+        particle_type:  tf.Tensor | tf.RaggedTensor,
         global_context: Optional[tf.Tensor]=None,
         *,
         num_steps:      int=1
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         # --- Shapes ---
-        positions_shape = tf.shape(positions)
-        D = positions_shape[-1]
-        T = positions_shape[-2]
-        N = positions_shape[-3]
+        if isinstance(positions, tf.Tensor):
+            positions_shape = tf.shape(positions)
+            D = positions_shape[-1]
+            T = positions_shape[-2]
+            N = positions_shape[-3]
+            B = positions_shape[-4]
+        else:  # `tf.RaggedTensor`
+            flat_positions_shape = tf.shape(positions.flat_values)
+            D = flat_positions_shape[-1]
+            T = flat_positions_shape[-2]
+            N = positions.row_lengths()  # Non-uniform!
+            B = positions.nrows()
         G = tf.shape(global_context)[-1] if global_context is not None else tf.constant([])
-        tf.print("Example input shapes:", "\nN =", N, "\nT =", T, "\nD =", D, "\nG =", G)
+        # tf.print("Input shapes:", "\nB =", B, "\nN =", N, "\nT =", T, "\nD =", D, "\nG =", G)
 
         # --- Dimensions ---
         tf.debugging.assert_equal(
@@ -263,15 +275,16 @@ class LearnedSimulator(tf.keras.Model):
         )
 
         # --- Types ---
-        tf.debugging.assert_integer(particle_type)
+        if not particle_type.dtype.is_integer:
+            raise TypeError(f"`particle_type` must be an integer tensor, but got {particle_type.dtype}")
         tf.debugging.assert_same_float_dtype([positions, global_context], tf.as_dtype(self.dtype))
 
-        return N, T, D, G
+        return B, N, T, D, G
 
     def _build_graph_tensor(
         self,
-        positions:      tf.Tensor,
-        particle_type:  tf.Tensor,
+        positions:      tf.Tensor | tf.RaggedTensor,
+        particle_type:  tf.Tensor | tf.RaggedTensor,
         global_context: Optional[tf.Tensor]=None
     ) -> tfgnn.GraphTensor:
         # --- Global features ---
@@ -285,12 +298,19 @@ class LearnedSimulator(tf.keras.Model):
         embedded_particle_type = self._particle_type_embedding(particle_type)
 
         vel_stats = self._normalization_stats["velocity"]
-        velocities = positions[:, 1:, :] - positions[:, :-1, :]
+        velocities = positions[..., 1:, :] - positions[..., :-1, :]
         recent_velocities = velocities[..., -self._velocity_context_size:, :]
         recent_velocities = (recent_velocities - vel_stats.mean) / vel_stats.std
-        recent_velocities = tf.reshape(recent_velocities, [tf.shape(recent_velocities)[0], -1])  # Merge time and space axes
+        # Merge temporal and spatial dim
+        if isinstance(recent_velocities, tf.Tensor):
+            recent_velocities = tf.reshape(recent_velocities, [-1, self._velocity_context_size * self._dim])
+        else:  # `tf.RaggedTensor`
+            recent_velocities = tf.RaggedTensor.from_row_splits(
+                tf.reshape(recent_velocities.flat_values, [-1, self._velocity_context_size * self._dim]),
+                recent_velocities.row_splits
+            )
 
-        last_position = positions[:, -1 , :]
+        last_position = positions[..., -1 , :]
         boundary_proximity = LearnedSimulator._compute_clipped_boundary_proximity(
             last_position,
             tf.convert_to_tensor(self._boundaries, dtype=self.dtype),
@@ -305,20 +325,41 @@ class LearnedSimulator(tf.keras.Model):
         }
 
         # --- Edge features ---
-        (num_particles, num_neighbors, neighbor_displacements, neighbor_distances,
-         senders, receivers) = tf.py_function(
-            func=LearnedSimulator._compute_neighborhoods,
-            inp=(last_position, self._cutoff_radius, self._self_interaction),
-            Tout=(tf.int64, tf.int64, self.dtype, self.dtype, tf.int64, tf.int64)
-        )
-        # Assert static shapes
-        num_particles = tf.ensure_shape(num_particles, [])
-        num_neighbors = tf.ensure_shape(num_neighbors, [])
-        # Set dynamic shapes for tracing
-        neighbor_displacements.set_shape([None, self._dim])
-        neighbor_distances.set_shape([None, 1])
-        senders.set_shape([None])
-        receivers.set_shape([None])
+        if isinstance(positions, tf.Tensor):
+            (num_particles, num_neighbors, neighbor_displacements, neighbor_distances,
+            senders, receivers) = tf.py_function(
+                func=LearnedSimulator._compute_neighborhoods,
+                inp=(last_position, self._cutoff_radius, self._self_interaction),
+                Tout=(tf.int64, tf.int64, self.dtype, self.dtype, tf.int64, tf.int64)
+            )
+            # Assert static shapes
+            num_particles = tf.ensure_shape(num_particles, [])
+            num_neighbors = tf.ensure_shape(num_neighbors, [])
+            # Set dynamic shapes for tracing
+            neighbor_displacements.set_shape([None, self._dim])
+            neighbor_distances.set_shape([None, 1])
+            senders.set_shape([None])
+            receivers.set_shape([None])
+        else:  # `tf.RaggedTensor`
+            (num_particles, num_neighbors, displacement_values, distance_values,
+            senders_values, receivers_values) = tf.py_function(
+                func=LearnedSimulator._compute_neighborhoods_flat_batch,
+                inp=(last_position, self._cutoff_radius, self._self_interaction),
+                Tout=(tf.int64, tf.int64, self.dtype, self.dtype, tf.int64, tf.int64)
+            )
+            # Assert static shapes
+            num_particles = tf.ensure_shape(num_particles, [None])
+            num_neighbors = tf.ensure_shape(num_neighbors, [None])
+            # Set dynamic shapes for tracing
+            displacement_values.set_shape([None, self._dim])
+            distance_values.set_shape([None, 1])
+            senders_values.set_shape([None])
+            receivers_values.set_shape([None])
+            # Compose ragged tensors from flat values
+            neighbor_displacements = tf.RaggedTensor.from_row_lengths(displacement_values, num_neighbors)
+            neighbor_distances     = tf.RaggedTensor.from_row_lengths(distance_values, num_neighbors)
+            senders                = tf.RaggedTensor.from_row_lengths(senders_values, num_neighbors)
+            receivers              = tf.RaggedTensor.from_row_lengths(receivers_values, num_neighbors)
 
         edge_features = {
             "neighbor_displacements": neighbor_displacements,
@@ -346,42 +387,42 @@ class LearnedSimulator(tf.keras.Model):
             }
         )
 
-        return graph      
+        return graph.merge_batch_to_components()        
 
     @tf.function
     def _integrate_acceleration(
         self,
-        positions: tf.Tensor,
-        norm_acc:  tf.Tensor
-    ) -> tf.Tensor:
+        positions: tf.Tensor | tf.RaggedTensor,
+        norm_acc:  tf.Tensor | tf.RaggedTensor
+    ) -> tf.Tensor | tf.RaggedTensor:
         """Compute next position by semi-implicit forward Euler."""
         acc_stats = self._normalization_stats["acceleration"]
         acc = norm_acc * acc_stats.std + acc_stats.mean
 
-        last_pos = positions[:, -1, :]
-        last_vel = last_pos - positions[:, -2, :]  # * dt = 1
-        next_vel = last_vel + acc                  # * dt = 1
-        next_pos = last_pos + next_vel             # * dt = 1
+        last_pos = positions[..., -1, :]
+        last_vel = last_pos - positions[..., -2, :]  # * dt = 1
+        next_vel = last_vel + acc                    # * dt = 1
+        next_pos = last_pos + next_vel               # * dt = 1
 
         return next_pos
 
     @tf.function
     def _differentiate_position(
         self,
-        positions:  tf.Tensor,
-        target_pos: tf.Tensor
-    ) -> tf.Tensor:
+        positions:  tf.Tensor | tf.RaggedTensor,
+        target_pos: tf.Tensor | tf.RaggedTensor
+    ) -> tf.Tensor | tf.RaggedTensor:
         """Compute normalized acceleration by inverting the forward step."""
-        prev_pos = positions[:, -1, :]
-        prev_vel = prev_pos - positions[:, -2, :]  # / dt = 1
-        next_vel = target_pos - prev_pos           # / dt = 1
-        acc = next_vel - prev_vel                  # / dt = 1
+        prev_pos = positions[..., -1, :]
+        prev_vel = prev_pos - positions[..., -2, :]  # / dt = 1
+        next_vel = target_pos - prev_pos             # / dt = 1
+        acc = next_vel - prev_vel                    # / dt = 1
 
         acc_stats = self._normalization_stats["acceleration"]
         norm_acc = (acc - acc_stats.mean) / acc_stats.std
 
         return norm_acc
-
+    
     @staticmethod
     def _compute_neighborhoods(
         positions:        tf.Tensor,
@@ -422,12 +463,46 @@ class LearnedSimulator(tf.keras.Model):
         return _compute_neighborhoods_np(np.asarray(positions))
     
     @staticmethod
+    def _compute_neighborhoods_flat_batch(
+        positions:        tf.RaggedTensor,
+        cutoff_radius:    float,
+        self_interaction: bool=False,
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        num_particles = []
+        num_neighbors = []
+        displacements = []
+        distances     = []
+        senders       = []
+        receivers     = []
+
+        for pos_b in positions:
+            (npart_b, nnbrs_b,
+            displs_b, dists_b,
+            sends_b, recvs_b) = LearnedSimulator._compute_neighborhoods(
+                pos_b, cutoff_radius, self_interaction)
+            num_particles.append(npart_b)
+            num_neighbors.append(nnbrs_b)
+            displacements.append(displs_b)
+            distances.append(dists_b)
+            senders.append(sends_b)
+            receivers.append(recvs_b)
+
+        return (
+                tf.stack(num_particles),
+                tf.stack(num_neighbors),
+                tf.concat(displacements, axis=0),
+                tf.concat(distances, axis=0),
+                tf.concat(senders, axis=0),
+                tf.concat(receivers, axis=0)
+        )
+
+    @staticmethod
     @tf.function
     def _compute_clipped_boundary_proximity(
-        positions:     tf.Tensor,
+        positions:     tf.Tensor | tf.RaggedTensor,
         boundaries:    tf.Tensor,
         cutoff_radius: float
-    ) -> tf.Tensor:
+    ) -> tf.Tensor | tf.RaggedTensor:
         lower_dist = positions - boundaries[:, 0]
         upper_dist = boundaries[:, 1] - positions
         dist = tf.concat([lower_dist, upper_dist], axis=-1)

@@ -3,7 +3,7 @@ import glob
 import json
 import os
 
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -83,11 +83,12 @@ def parse_cli_args():
 
 def load_dataset(
     data_path:           str,
+    batch_size:          Optional[int]=None,
     split:               str="train",  # or "valid" or "test"
     mode:                str="one_step",  # or "one_step_train" or "rollout"
     shuffle_buffer_size: int=10_000,  # @S-G, p. 13
     window_length:       int=7,  # @S-G, p. 4
-    repeat:              bool=True
+    repeat:              bool=True,
 ) -> tf.data.Dataset:
     # Load metadata.json
     metadata = load_metadata(data_path)
@@ -101,13 +102,13 @@ def load_dataset(
         # Split further into model inputs and target positions
         ds = ds.map(prepare_step_inputs)
         ds = ds.cache()
-        # If in train mode, optionally repeat dataset and shuffle
         if mode == "one_step_train":
             ds = ds.repeat() if repeat else ds
             ds = ds.shuffle(shuffle_buffer_size)
             options = tf.data.Options()
             options.deterministic = False
             ds = ds.with_options(options)
+        ds = ds.ragged_batch(batch_size, drop_remainder=True)
         ds = ds.prefetch(tf.data.AUTOTUNE)
     elif mode == "rollout":
         ds = ds.map(lambda ctx, fts: prepare_rollout_inputs(ctx, fts), 
