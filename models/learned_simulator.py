@@ -210,6 +210,9 @@ class LearnedSimulator(tf.keras.Model):
             parallel_iterations=1
         )
 
+        # Trim down ground truth to num_steps
+        ground_truth_pos = ground_truth_pos[:, :num_steps, :]
+
         # Align positions
         pred_pos = pred_pos.stack()
         initial_pos = utils.ops.swap_dims(initial_pos, -2, -3)
