@@ -105,6 +105,9 @@ def load_dataset(
         if mode == "one_step_train":
             ds = ds.repeat() if repeat else ds
             ds = ds.shuffle(shuffle_buffer_size)
+            options = tf.data.Options()
+            options.deterministic = False
+            ds = ds.with_options(options)
         ds = ds.prefetch(tf.data.AUTOTUNE)
     elif mode == "rollout":
         ds = ds.map(lambda ctx, fts: prepare_rollout_inputs(ctx, fts), 
