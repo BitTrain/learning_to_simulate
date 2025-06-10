@@ -88,8 +88,8 @@ def load_dataset(
     mode:                str="one_step",  # or "one_step_train" or "rollout"
     shuffle_buffer_size: int=10_000,  # @S-G, p. 13
     window_length:       int=7,  # @S-G, p. 4
-    repeat:              bool=True,
-) -> tf.data.Dataset:
+    materialize_cache:   bool=True,
+) -> Tuple[tf.data.Dataset, Optional[int]]:
     # Load metadata.json
     metadata = load_metadata(data_path)
 
@@ -101,9 +101,11 @@ def load_dataset(
         ds = ds.flat_map(lambda ctx, fts: split_trajectory(ctx, fts, window_length))
         # Split further into model inputs and target positions
         ds = ds.map(prepare_step_inputs)
+        # Cache pre-processed examples in memory
         ds = ds.cache()
+        ds_size = sum(1 for _ in ds) if materialize_cache else None
         if mode == "one_step_train":
-            ds = ds.repeat() if repeat else ds
+            ds = ds.repeat()
             ds = ds.shuffle(shuffle_buffer_size)
             options = tf.data.Options()
             options.deterministic = False
@@ -114,11 +116,12 @@ def load_dataset(
         ds = ds.map(lambda ctx, fts: prepare_rollout_inputs(ctx, fts), 
                     num_parallel_calls=tf.data.AUTOTUNE)
         ds = ds.cache()
+        ds_size = sum(1 for _ in ds) if materialize_cache else None
         ds = ds.prefetch(tf.data.AUTOTUNE)
     else:
         raise ValueError(f"mode: {mode} not recognized")
 
-    return ds
+    return ds, ds_size
 
 def parse_serialized_simulation_example(
     serialized: bytes,
