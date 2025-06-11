@@ -106,7 +106,7 @@ def load_dataset(
         ds_size = sum(1 for _ in ds) if materialize_cache else None
         if mode == "one_step_train":
             ds = ds.repeat()
-            ds = ds.shuffle(shuffle_buffer_size)
+            ds = ds.shuffle(ds_size if materialize_cache else shuffle_buffer_size)
             options = tf.data.Options()
             options.deterministic = False
             ds = ds.with_options(options)
