@@ -452,7 +452,7 @@ class LearnedSimulator(tf.keras.Model):
 
             num_neighbors = len(senders)
 
-            displacements = positions_np[receivers] - positions_np[senders]
+            displacements = (positions_np[receivers] - positions_np[senders]) / cutoff_radius
             distances = np.linalg.norm(displacements, axis=1, keepdims=True)
 
             return (
