@@ -301,7 +301,7 @@ class LearnedSimulator(tf.keras.Model):
         )
 
         node_features = {
-            "position": last_position,
+            # "position": last_position,  # 'Absolute variant' @S-G p. 3
             "recent_velocities": recent_velocities,
             "boundary_proximity": boundary_proximity,
             "embedded_particle_type": embedded_particle_type,
