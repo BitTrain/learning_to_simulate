@@ -3,7 +3,7 @@ import glob
 import json
 import os
 
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
