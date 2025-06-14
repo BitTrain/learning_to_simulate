@@ -53,8 +53,8 @@ class LearnedSimulator(tf.keras.Model):
         )
 
         # Metrics
-        self.mse_loss = tf.keras.metrics.MeanSquaredError(name="mse_loss")
-        self.one_step_mse = tf.keras.metrics.MeanSquaredError(name="one_step_mse")
+        self.acc_mse = tf.keras.metrics.MeanSquaredError(name="acc_mse")
+        self.step_mse = tf.keras.metrics.MeanSquaredError(name="step_mse")
         self.rollout_mse = tf.keras.metrics.MeanSquaredError(name="rollout_mse")
 
     def get_config(self):
@@ -84,7 +84,7 @@ class LearnedSimulator(tf.keras.Model):
 
     @property
     def metrics(self):
-        return [self.mse_loss, self.one_step_mse, self.rollout_mse]
+        return [self.acc_mse, self.step_mse, self.rollout_mse]
 
     def call(
         self,
@@ -135,11 +135,9 @@ class LearnedSimulator(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         # Update metrics
-        self.mse_loss.update_state(target_acc, pred_acc)
+        self.acc_mse.update_state(target_acc, pred_acc)
 
-        return {
-            "mse_loss": self.mse_loss.result()
-        }
+        return { "loss": self.acc_mse.result() }
 
     def test_step(
         self,
@@ -157,10 +155,11 @@ class LearnedSimulator(tf.keras.Model):
         pred_pos = self._integrate_acceleration(positions, pred_acc)
 
         # Update metrics
-        self.one_step_mse.update_state(target_pos, pred_pos)
+        self.step_mse.update_state(target_pos, pred_pos)
 
         return {
-            "loss": self.one_step_mse.result()
+            "loss": self.acc_mse.result(),
+            "err": self.step_mse.result()
         }
 
     def rollout(
@@ -214,7 +213,7 @@ class LearnedSimulator(tf.keras.Model):
         ground_truth_pos = ground_truth_pos[:, :num_steps, :]
 
         # Align positions
-        pred_pos = pred_pos.stack()
+        pred_pos = pred_pos.stack()  # [T, N, D]
         initial_pos = utils.ops.swap_dims(initial_pos, -2, -3)
         ground_truth_pos = utils.ops.swap_dims(ground_truth_pos, -2, -3)
 
@@ -407,7 +406,7 @@ class LearnedSimulator(tf.keras.Model):
 
             num_neighbors = len(senders)
 
-            displacements = positions_np[receivers] - positions_np[senders]
+            displacements = (positions_np[receivers] - positions_np[senders]) / cutoff_radius
             distances = np.linalg.norm(displacements, axis=1, keepdims=True)
 
             return (

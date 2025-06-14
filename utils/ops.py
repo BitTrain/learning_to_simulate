@@ -3,7 +3,7 @@ import tensorflow as tf
 
 @tf.function
 def swap_dims(tensor: tf.Tensor, i: int, j: int) -> tf.Tensor:
-    """Swaps two dimensions of a tensor with or without batching."""
+    """Swaps two dimensions of a tensor."""
     rank = tf.rank(tensor)
     perm = tf.range(rank)
     
