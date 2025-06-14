@@ -146,15 +146,19 @@ class LearnedSimulator(tf.keras.Model):
         """One-step evaluation."""
         positions = inputs["positions"]
 
-        # Split off last step as target
+        # Split off last step as target position
         target_pos = positions[:, -1, :]
         positions = positions[:, :-1, :]
 
-        # Get predicted next position
+        # Get target acceleration
+        target_acc = self._differentiate_position(positions, target_pos)
+
+        # Get predicted acceleration and next position
         pred_acc = self(inputs)
         pred_pos = self._integrate_acceleration(positions, pred_acc)
 
         # Update metrics
+        self.acc_mse.update_state(target_acc, pred_acc)
         self.step_mse.update_state(target_pos, pred_pos)
 
         return {
