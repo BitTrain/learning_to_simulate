@@ -88,8 +88,8 @@ class LearnedSimulator(tf.keras.Model):
 
     def call(
         self,
-        inputs,
-        training:       bool=False
+        inputs:   Mapping[str, tf.Tensor],
+        training: bool=False
     ) -> tf.Tensor:
         """Forward pass of the model, producing normalized accelerations."""
         positions = inputs["positions"]
@@ -322,7 +322,7 @@ class LearnedSimulator(tf.keras.Model):
 
         node_features = {
             # "position": last_position,  # 'Absolute variant' @S-G p. 4
-            "recent_velocities": velocities,
+            "velocities": velocities,
             "boundary_proximity": boundary_proximity,
             "embedded_particle_type": embedded_particle_type,
         }
