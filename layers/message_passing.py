@@ -3,6 +3,8 @@ from typing import Collection, Optional
 import tensorflow as tf
 import tensorflow_gnn as tfgnn
 
+from utils.data import SQRT_EPS
+
 
 def CustomVanillaMPNNGraphUpdate(
     *,
@@ -50,7 +52,7 @@ def CustomVanillaMPNNGraphUpdate(
         for _ in range(depth):
             layers.add(tf.keras.layers.Dense(units, **dense_layer_kwargs))
         if use_layer_normalization:
-            layers.add(tf.keras.layers.LayerNormalization())
+            layers.add(tf.keras.layers.LayerNormalization(epsilon=SQRT_EPS[self.dtype]))
         return layers
 
     gnn_builder = tfgnn.keras.ConvGNNBuilder(
