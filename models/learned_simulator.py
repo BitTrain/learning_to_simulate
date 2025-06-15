@@ -88,8 +88,8 @@ class LearnedSimulator(tf.keras.Model):
 
     def call(
         self,
-        inputs:   Mapping[str, tf.Tensor],
-        training: bool=False
+        inputs,
+        training:       bool=False
     ) -> tf.Tensor:
         """Forward pass of the model, producing normalized accelerations."""
         positions = inputs["positions"]
@@ -111,22 +111,29 @@ class LearnedSimulator(tf.keras.Model):
         """One-step training."""
         positions = inputs["positions"]
         particle_type = inputs["particle_type"]
+        global_context = inputs.get("global_context")
 
         # Corrupt input positions with random walk noise
         is_not_static = tf.not_equal(particle_type, self._static_particle_type_id)[..., tf.newaxis, tf.newaxis]
         position_noise = utils.noise.random_walk_noise(positions, target_std=self._noise_std, mask=is_not_static)
         positions += position_noise
 
-        # Split off last step as target
+        # Split into seed positions + target
         target_pos = positions[:, -1, :]
-        positions = positions[:, :-1, :]
+        seed_pos = positions[:, :-1, :]
 
-        # Get predicted and target normalized acceleration and compute loss
+        # Get target acceleration
+        target_acc = self._differentiate_position(seed_pos, target_pos)
+
+        # Get predicted acceleration and compute loss
         with tf.GradientTape() as tape:
-            pred_acc = self(inputs, training=True)
-            target_acc = self._differentiate_position(
-                positions, 
-                target_pos
+            pred_acc = self(
+                {
+                    "positions": seed_pos,
+                    "particle_type": particle_type,
+                    "global_context": global_context
+                },
+                training=True
             )
             loss_acc = tf.reduce_mean(tf.square(target_acc - pred_acc))
 
@@ -145,16 +152,24 @@ class LearnedSimulator(tf.keras.Model):
     ) -> Mapping[str, tf.Tensor]:
         """One-step evaluation."""
         positions = inputs["positions"]
+        particle_type = inputs["particle_type"]
+        global_context = inputs.get("global_context")
 
-        # Split off last step as target position
+        # Split off into seed positions + target
         target_pos = positions[:, -1, :]
-        positions = positions[:, :-1, :]
+        seed_pos = positions[:, :-1, :]
 
         # Get target acceleration
-        target_acc = self._differentiate_position(positions, target_pos)
+        target_acc = self._differentiate_position(seed_pos, target_pos)
 
         # Get predicted acceleration and next position
-        pred_acc = self(inputs)
+        pred_acc = self(
+            {
+                "positions": seed_pos,
+                "particle_type": particle_type,
+                "global_context": global_context
+            }
+        )
         pred_pos = self._integrate_acceleration(positions, pred_acc)
 
         # Update metrics
@@ -186,12 +201,18 @@ class LearnedSimulator(tf.keras.Model):
         def step_fn(step, seed_pos, pred_pos):
             # Get global context at current time step
             if global_contexts is None:
-                inputs["global_context"] = None
+                global_context = None
             else:
-                inputs["global_context"] = global_contexts[step + num_seed - 1][tf.newaxis]
+                global_context = global_contexts[step + num_seed - 1][tf.newaxis]
 
             # Update positions
-            pred_acc = self(inputs)
+            pred_acc = self(
+                {
+                    "positions": seed_pos,
+                    "particle_type": particle_type,
+                    "global_context": global_context
+                }
+            )
             next_pos = tf.where(
                 is_static,
                 ground_truth_pos[..., step, :],  # Use frozen ground truth for static particles
@@ -289,9 +310,8 @@ class LearnedSimulator(tf.keras.Model):
 
         vel_stats = self._normalization_stats["velocity"]
         velocities = positions[:, 1:, :] - positions[:, :-1, :]
-        recent_velocities = velocities[..., -self._velocity_context_size:, :]
-        recent_velocities = (recent_velocities - vel_stats.mean) / vel_stats.std
-        recent_velocities = tf.reshape(recent_velocities, [tf.shape(recent_velocities)[0], -1])  # Merge time and space axes
+        velocities = (velocities - vel_stats.mean) / vel_stats.std
+        velocities = tf.reshape(velocities, [tf.shape(velocities)[0], -1])  # Merge time and space axes
 
         last_position = positions[:, -1 , :]
         boundary_proximity = LearnedSimulator._compute_clipped_boundary_proximity(
@@ -302,7 +322,7 @@ class LearnedSimulator(tf.keras.Model):
 
         node_features = {
             # "position": last_position,  # 'Absolute variant' @S-G p. 4
-            "recent_velocities": recent_velocities,
+            "recent_velocities": velocities,
             "boundary_proximity": boundary_proximity,
             "embedded_particle_type": embedded_particle_type,
         }
@@ -349,7 +369,7 @@ class LearnedSimulator(tf.keras.Model):
             }
         )
 
-        return graph      
+        return graph
 
     @tf.function
     def _integrate_acceleration(
