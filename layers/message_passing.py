@@ -50,7 +50,7 @@ def CustomVanillaMPNNGraphUpdate(
         for _ in range(depth):
             layers.add(tf.keras.layers.Dense(units, **dense_layer_kwargs))
         if use_layer_normalization:
-            layers.add(tf.keras.layers.LayerNormalization())
+            layers.add(tf.keras.layers.LayerNormalization(epsilon=1e-7))
         return layers
 
     gnn_builder = tfgnn.keras.ConvGNNBuilder(
