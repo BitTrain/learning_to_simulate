@@ -205,8 +205,6 @@ class LearnedSimulator(tf.keras.Model):
             else:
                 global_context = global_contexts[step + num_seed - 1][tf.newaxis]
 
-            tf.print("seed_pos shape:", tf.shape(seed_pos))
-
             # Update positions
             pred_acc = self(
                 {
