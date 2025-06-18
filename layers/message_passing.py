@@ -11,12 +11,12 @@ def CustomVanillaMPNNGraphUpdate(
     update_depth:            int,
     message_depth:           int,
     receiver_tag:            tfgnn.IncidentNodeTag,
+    hidden_activation:       str="relu",
     node_set_names:          Optional[Collection[tfgnn.NodeSetName]]=None,
     edge_feature:            Optional[tfgnn.FieldName]=None,
     reduce_type:             str="sum",
     use_layer_normalization: bool=False,
-    next_state_layer:        tf.keras.layers.Layer=tfgnn.keras.layers.NextStateFromConcat,
-    **dense_layer_kwargs
+    next_state_layer:        tf.keras.layers.Layer=tfgnn.keras.layers.NextStateFromConcat
 ) -> tf.keras.layers.Layer:
     """
     Builds a customizable tfgnn.GraphUpdate layer based on the vanilla message-passing neural network (MPNN).
@@ -26,6 +26,7 @@ def CustomVanillaMPNNGraphUpdate(
         message_dim: Dimension of message vectors.
         update_depth: Number of Dense layers in the node update MLP.
         message_depth: Number of Dense layers in the message MLP.
+        hidden_activation: Activation on *hidden* Dense layers in MLPs.
         receiver_tag: Which node of each edge receives the message. One of
             `tfgnn.TARGET` or `tfgnn.SOURCE`.
         node_set_names: The names of node sets to update. If unset, updates all
@@ -45,10 +46,11 @@ def CustomVanillaMPNNGraphUpdate(
         A GraphUpdate layer built from the tfgnn.keras.ConvGNNBuilder factory for use 
         on a scalar GraphTensor with `tfgnn.HIDDEN_STATE` features on the node sets.
     """
-    def mlp(units, depth, *, use_layer_normalization=False, name="mlp", **dense_layer_kwargs):
+    def mlp(units, depth, *, hidden_activation="relu", use_layer_normalization=False, name="mlp"):
         layers = tf.keras.Sequential(name=name)
-        for _ in range(depth):
-            layers.add(tf.keras.layers.Dense(units, **dense_layer_kwargs))
+        for _ in range(depth - 1):
+            layers.add(tf.keras.layers.Dense(units, activation=hidden_activation))
+        layers.add(tf.keras.layers.Dense(units, activation="linear"))
         if use_layer_normalization:
             layers.add(tf.keras.layers.LayerNormalization(epsilon=1e-7))
         return layers
@@ -57,9 +59,9 @@ def CustomVanillaMPNNGraphUpdate(
         lambda edge_set_name, receiver_tag: tfgnn.keras.layers.SimpleConv(
             mlp(message_dim, 
                 message_depth,
+                hidden_activation=hidden_activation,
                 use_layer_normalization=use_layer_normalization,
-                name="mlp_message",
-                **dense_layer_kwargs),
+                name="mlp_message"),
             reduce_type,
             receiver_tag=receiver_tag,
             sender_edge_feature=edge_feature
@@ -67,10 +69,9 @@ def CustomVanillaMPNNGraphUpdate(
         lambda node_set_name: next_state_layer(
             mlp(update_dim,
                 update_depth,
+                hidden_activation=hidden_activation,
                 use_layer_normalization=use_layer_normalization,
-                name="mlp_update",
-                **dense_layer_kwargs
-            )
+                name="mlp_update")
         ),
         receiver_tag=receiver_tag
     )

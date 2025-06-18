@@ -45,7 +45,6 @@ class EncodeProcessDecode(tf.keras.Model):
         )
 
         # Vanilla MPNN processors with skip connections
-        dense_layer_kwargs = {"activation": "relu"}
         if shared_params:
             self._processors = num_message_passes * [
                CustomVanillaMPNNGraphUpdate(
@@ -53,12 +52,12 @@ class EncodeProcessDecode(tf.keras.Model):
                     message_dim=message_dim,
                     update_depth=mlp_depth,
                     message_depth=mlp_depth,
+                    hidden_activation="relu",
                     receiver_tag=tfgnn.TARGET,
                     edge_feature=tfgnn.HIDDEN_STATE,
                     reduce_type=reduce_type,
                     use_layer_normalization=True,
-                    next_state_layer=tfgnn.keras.layers.ResidualNextState,
-                    **dense_layer_kwargs
+                    next_state_layer=tfgnn.keras.layers.ResidualNextState
                 )
             ]
         else:
@@ -68,12 +67,12 @@ class EncodeProcessDecode(tf.keras.Model):
                     message_dim=message_dim,
                     update_depth=mlp_depth,
                     message_depth=mlp_depth,
+                    hidden_activation="relu",
                     receiver_tag=tfgnn.TARGET,
                     edge_feature=tfgnn.HIDDEN_STATE,
                     reduce_type=reduce_type,
                     use_layer_normalization=True,
-                    next_state_layer=tfgnn.keras.layers.ResidualNextState,
-                    **dense_layer_kwargs
+                    next_state_layer=tfgnn.keras.layers.ResidualNextState
                 )
                 for _ in range(num_message_passes)
             ]
