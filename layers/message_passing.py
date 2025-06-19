@@ -3,6 +3,8 @@ from typing import Collection, Optional
 import tensorflow as tf
 import tensorflow_gnn as tfgnn
 
+from learning_to_simulate.layers.mlp import mlp
+
 
 def CustomVanillaMPNNGraphUpdate(
     *,
@@ -46,19 +48,11 @@ def CustomVanillaMPNNGraphUpdate(
         A GraphUpdate layer built from the tfgnn.keras.ConvGNNBuilder factory for use 
         on a scalar GraphTensor with `tfgnn.HIDDEN_STATE` features on the node sets.
     """
-    def mlp(units, depth, *, hidden_activation="relu", use_layer_normalization=False, name="mlp"):
-        layers = tf.keras.Sequential(name=name)
-        for _ in range(depth - 1):
-            layers.add(tf.keras.layers.Dense(units, activation=hidden_activation))
-        layers.add(tf.keras.layers.Dense(units, activation="linear"))
-        if use_layer_normalization:
-            layers.add(tf.keras.layers.LayerNormalization(epsilon=1e-7))
-        return layers
-
     gnn_builder = tfgnn.keras.ConvGNNBuilder(
         lambda edge_set_name, receiver_tag: tfgnn.keras.layers.SimpleConv(
             mlp(message_dim, 
                 message_depth,
+                message_dim,
                 hidden_activation=hidden_activation,
                 use_layer_normalization=use_layer_normalization,
                 name="mlp_message"),
@@ -69,6 +63,7 @@ def CustomVanillaMPNNGraphUpdate(
         lambda node_set_name: next_state_layer(
             mlp(update_dim,
                 update_depth,
+                update_dim,
                 hidden_activation=hidden_activation,
                 use_layer_normalization=use_layer_normalization,
                 name="mlp_update")

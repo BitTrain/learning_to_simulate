@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow_gnn as tfgnn
 
+from learning_to_simulate.layers.mlp import mlp
 from learning_to_simulate.layers.message_passing import CustomVanillaMPNNGraphUpdate
 
 
@@ -25,10 +26,10 @@ class EncodeProcessDecode(tf.keras.Model):
         super().__init__(name=name)
 
         def embedding_fn(graph_piece, **kwargs):
-            """Linear embedding layer on concatenated features."""
+            """MLP embedding layer on concatenated features."""
             features = graph_piece.get_features_dict()
             if features:
-                return tf.keras.layers.Dense(latent_dim)(
+                return mlp(latent_dim, mlp_depth, latent_dim, use_layer_normalization=True)(
                     tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
                 )
             else:
@@ -77,11 +78,11 @@ class EncodeProcessDecode(tf.keras.Model):
                 for _ in range(num_message_passes)
             ]
 
-        # Linear decoder on nodes' updated hidden states
+        # MLP decoder on nodes' updated hidden states
         self._decoder = tf.keras.Sequential(
            [
                 tfgnn.keras.layers.Readout(node_set_name=node_set_name),
-                tf.keras.layers.Dense(output_dim)
+                mlp(latent_dim, mlp_depth, output_dim)
            ],
            name="prediction_head"
         )
