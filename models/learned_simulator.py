@@ -110,13 +110,14 @@ class LearnedSimulator(tf.keras.Model):
         positions = inputs["positions"]
         particle_type = inputs["particle_type"]
         global_context = inputs.get("global_context")
+        target_bits = inputs["target_bits"]
 
         if settings.TF_DEBUG_MODE:
             self._check_tensor_inputs(positions, particle_type, global_context)
 
         acceleration = tf.zeros_like(positions[:, -1, :])
         input_graph = self._build_graph_tensor(positions, particle_type, acceleration, global_context)
-        acceleration, logits = self._gnn(input_graph, acceleration, training)
+        acceleration, logits = self._gnn(input_graph, acceleration, training, target_bits)
 
         return acceleration, logits
     
@@ -140,6 +141,9 @@ class LearnedSimulator(tf.keras.Model):
 
         # Get target acceleration
         target_acc = self._differentiate_position(seed_pos, target_pos)
+        int_type = TF_NUMERIC_TO_INT[target_acc.dtype.name]
+        bw_sizes = tf.constant(self._bitwave_sizes, dtype=int_type)
+        target_bits = bitqueue.from_numeric(target_acc, bw_sizes, self._bitqueue_size)
 
         # Get predicted acceleration and compute loss
         with tf.GradientTape() as tape:
@@ -147,16 +151,12 @@ class LearnedSimulator(tf.keras.Model):
                 {
                     "positions": seed_pos,
                     "particle_type": particle_type,
-                    "global_context": global_context
+                    "global_context": global_context,
+                    "target_bits": target_bits
                 },
                 training=True
             )
-
-            int_type = TF_NUMERIC_TO_INT[target_acc.dtype.name]
-            bw_sizes = tf.constant(self._bitwave_sizes, dtype=int_type)
             bq_combos = tf.range(1 << self._bitqueue_size, dtype=int_type)
-            target_bits = bitqueue.from_numeric(target_acc, bw_sizes, self._bitqueue_size)
-
             losses = []
             for i, logit in enumerate(logits):
                 tgt = tf.gather(target_bits, i, axis=-1)

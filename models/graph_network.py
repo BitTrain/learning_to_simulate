@@ -1,3 +1,5 @@
+from typing import Optional
+
 import tensorflow as tf
 import tensorflow_gnn as tfgnn
 
@@ -107,7 +109,8 @@ class EncodeProcessDecode(tf.keras.Model):
         self,
         input_graph:  tfgnn.GraphTensor,
         acceleration: tf.Tensor,
-        training:     bool=False
+        training:     bool=False,
+        target_bits:  Optional[tf.Tensor]=None,
     ):
         dtype = acceleration.dtype
         int_type = TF_NUMERIC_TO_INT[dtype.name]
@@ -116,7 +119,7 @@ class EncodeProcessDecode(tf.keras.Model):
 
         logits_list = []
         rem = sum(self._bitwave_sizes)
-        for bw_size, processor, decoder in zip(self._bitwave_sizes, self._processors, self._decoders):
+        for i, (bw_size, processor, decoder) in enumerate(zip(self._bitwave_sizes, self._processors, self._decoders)):
             node_set = latent_graph.node_sets[self._node_set_name]
             latent_graph = latent_graph.replace_features(node_sets={
                 self._node_set_name: {
@@ -130,7 +133,10 @@ class EncodeProcessDecode(tf.keras.Model):
             dims = tf.shape(acceleration)[1]
             logits = tf.reshape(logits, (num_particles, dims, self._bitqueue_range))
             logits_list.append(logits)
-            bits = bitqueue.sample_from_logits(logits, dtype=int_type)
+            if training and target_bits is not None:
+                bits = tf.gather(target_bits, i, axis=-1)
+            else:
+                bits = bitqueue.sample_from_logits(logits, dtype=int_type)
             delta = bitqueue.to_numeric(bits, self._bitqueue_size, rem, dtype)
             acceleration += delta
             rem -= bw_size
