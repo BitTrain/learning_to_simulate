@@ -7,7 +7,7 @@ from learning_to_simulate.utils.bitqueue import validate_bitwave_sizes
 @tf.function
 def bitwise_regression_loss(
     target_bits: tf.Tensor,
-    bit_probs:   tf.Tensor,
+    logits:      tf.Tensor,
     bit_combos:  tf.Tensor,
     num_bits:    int,
     loss_blend:  float=0.5,
@@ -15,14 +15,14 @@ def bitwise_regression_loss(
     """
     Differentiable weighted sum of cross-entropy and mean squared loss.
     """
-    loss_dtype = bit_probs.dtype
+    loss_dtype = logits.dtype
 
-    cce = -tf.math.log(
-                tf.gather(bit_probs, target_bits, batch_dims=target_bits.shape.rank)
-            ) / tf.math.log(tf.cast(2.0, loss_dtype))
+    cce = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=target_bits, logits=logits) / tf.cast(tf.math.log(2.0), loss_dtype)
     
+    probs = tf.nn.softmax(logits, axis=-1)
     err = tf.expand_dims(target_bits, axis=-1) - bit_combos
-    mse = tf.reduce_sum(bit_probs * tf.cast(tf.square(err), loss_dtype), axis=-1)
+    mse = tf.reduce_sum(probs * tf.cast(tf.square(err), loss_dtype), axis=-1)
 
     expected_cce = tf.cast(num_bits, loss_dtype)
     expected_mse = tf.cast(tf.bitwise.left_shift(1, 2 * num_bits) - 1, loss_dtype) / 6.0
@@ -61,11 +61,11 @@ if __name__ == "__main__":
                                        maxval=bitqueue_range,
                                        dtype=int_type)
     float_type     = tf.as_dtype(float_typename)
-    bit_probs      = tf.ones(shape=(*target_bits.shape, bitqueue_range), dtype=float_type) / bitqueue_range
+    logits      = tf.ones(shape=(*target_bits.shape, bitqueue_range), dtype=float_type) / bitqueue_range
 
     for i in range(num_bitwaves):
         loss = bitwise_regression_loss(tf.gather(target_bits, i, axis=-1),
-                                       tf.gather(bit_probs, i, axis=-2),
+                                       tf.gather(logits, i, axis=-2),
                                        tf.range(1 << bitqueue_size, dtype=int_type),
                                        tf.constant(bitqueue_size))
         print(f"Bitwave {i:<{len(str(num_bitwaves - 1))}} loss: {loss.numpy():.6f}")
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     num_bitwaves   = len(bitwave_sizes)
 
     float_typename = "float64"
-    float_type     = tf.as_dtype(float_type)
+    float_type     = tf.as_dtype(float_typename)
     validate_bitwave_sizes(float_typename,
                            tf.constant(bitwave_sizes),
                            bitqueue_size)
@@ -93,11 +93,11 @@ if __name__ == "__main__":
                                        minval=0,
                                        maxval=bitqueue_range,
                                        dtype=int_type)
-    bit_probs      = tf.ones(shape=(*target_bits.shape, bitqueue_range), dtype=float_type) / bitqueue_range
+    logits      = tf.ones(shape=(*target_bits.shape, bitqueue_range), dtype=float_type) / bitqueue_range
 
     for i in range(num_bitwaves):
         loss = bitwise_regression_loss(tf.gather(target_bits, i, axis=-1),
-                                       tf.gather(bit_probs, i, axis=-2),
+                                       tf.gather(logits, i, axis=-2),
                                        tf.range(1 << bitqueue_size, dtype=int_type),
                                        tf.constant(bitqueue_size))
         print(f"Bitwave {i:<{len(str(num_bitwaves - 1))}} loss: {loss.numpy():.6f}")

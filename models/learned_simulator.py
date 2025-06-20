@@ -155,13 +155,12 @@ class LearnedSimulator(tf.keras.Model):
             int_type = TF_NUMERIC_TO_INT[target_acc.dtype.name]
             bw_sizes = tf.constant(self._bitwave_sizes, dtype=int_type)
             bq_combos = tf.range(1 << self._bitqueue_size, dtype=int_type)
-            target_bits = bitqueue.from_numeric(target_acc, bw_sizes, self._bitqueue_sizes)
+            target_bits = bitqueue.from_numeric(target_acc, bw_sizes, self._bitqueue_size)
 
             losses = []
             for i, logit in enumerate(logits):
-                bit_probs = tf.nn.softmax(logit, axis=-1)
                 tgt = tf.gather(target_bits, i, axis=-1)
-                loss = bitwise_regression_loss(tgt, bit_probs, bq_combos, tf.constant(self._bitqueue_size, int_type))
+                loss = bitwise_regression_loss(tgt, logit, bq_combos, tf.constant(self._bitqueue_size, int_type))
                 losses.append(loss)
             loss_acc = tf.add_n(losses)
 

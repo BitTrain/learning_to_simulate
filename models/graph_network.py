@@ -13,16 +13,16 @@ class EncodeProcessDecode(tf.keras.Model):
     def __init__(
         self,
         *,
-        output_dim:         int,
-        bitwave_sizes:      tuple[int, ...],
-        bitqueue_size:      int,
-        latent_dim:         int=128,  # @ S-G, p. 4-5
-        message_dim:        int=128,  # @ S-G, p. 4-5
-        mlp_depth:          int=2,    # @ S-G, p. 4
-        shared_params:      bool=False,
-        reduce_type:        str="sum",
-        node_set_name:      str="particles",
-        name:               str="EncodeProcessDecode",
+        output_dim:    int,
+        bitwave_sizes: tuple[int, ...],
+        bitqueue_size: int,
+        latent_dim:    int=128,  # @ S-G, p. 4-5
+        message_dim:   int=128,  # @ S-G, p. 4-5
+        mlp_depth:     int=2,    # @ S-G, p. 4
+        shared_params: bool=False,
+        reduce_type:   str="sum",
+        node_set_name: str="particles",
+        name:          str="EncodeProcessDecode",
     ):
         super().__init__(name=name)
 
@@ -106,12 +106,14 @@ class EncodeProcessDecode(tf.keras.Model):
 
     def call(
         self,
-        input_graph: tfgnn.GraphTensor,
+        input_graph:  tfgnn.GraphTensor,
         acceleration: tf.Tensor,
-        training: bool=False
+        training:     bool=False
     ):
         dtype = acceleration.dtype
         int_type = TF_NUMERIC_TO_INT[dtype.name]
+
+        latent_graph = self._encoder(input_graph, training=training)
 
         logits_list = []
         rem = sum(self._bitwave_sizes)
