@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow_gnn as tfgnn
 
 from learning_to_simulate.layers.mlp import mlp
-from learning_to_simulate.layers.message_passing import CustomVanillaMPNNGraphUpdate
+from learning_to_simulate.layers.mpnn import CustomVanillaMPNNGraphUpdate
 
 
 class EncodeProcessDecode(tf.keras.Model):
