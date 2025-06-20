@@ -83,14 +83,26 @@ def CustomVanillaMPNNGraphUpdate(
 
     class _Wrapper(tf.keras.layers.Layer):
         def call(self, graph: tfgnn.GraphTensor, training=False):
+            names = node_set_names or graph.node_sets
+            hidden_cache = {}
             if extra_node_feature is not None:
                 names = node_set_names or graph.node_sets
                 for name in names:
                     node_set = graph.node_sets[name]
                     hidden = node_set[tfgnn.HIDDEN_STATE]
+                    hidden_cache[name] = hidden
                     extra = node_set[extra_node_feature]
                     concat = tf.concat([hidden, extra], axis=-1)
                     graph = graph.replace_features(node_sets={name: {tfgnn.HIDDEN_STATE: concat}})
-            return base_layer(graph, training=training)
+            
+            graph = base_layer(graph, training=training)
+
+            if extra_node_feature is not None:
+                for name in names:
+                    updated = graph.node_sets[name][tfgnn.HIDDEN_STATE]
+                    updated = updated + hidden_cache[name]
+                    graph = graph.replace_features(node_sets={name: {tfgnn.HIDDEN_STATE: updated}})
+
+            return graph
 
     return _Wrapper()

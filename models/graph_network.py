@@ -3,6 +3,7 @@ import tensorflow_gnn as tfgnn
 
 from learning_to_simulate.layers.message_passing import CustomVanillaMPNNGraphUpdate
 from learning_to_simulate.utils import bitqueue
+from learning_to_simulate.utils.data import TF_NUMERIC_TO_INT
 
 
 class EncodeProcessDecode(tf.keras.Model):
@@ -33,30 +34,28 @@ class EncodeProcessDecode(tf.keras.Model):
 
         self._node_set_name = node_set_name
 
-        self._feature_embed = tf.keras.layers.Dense(latent_dim)
         self._acc_embed = tf.keras.layers.Dense(latent_dim)
+        self._node_embed = tf.keras.layers.Dense(latent_dim)
+        self._edge_embed = tf.keras.layers.Dense(latent_dim)
 
         def node_embedding_fn(node_set, **kwargs):
             features = node_set.get_features_dict()
             acc = features.pop("acceleration")
             base = tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
             return {
-                tfgnn.HIDDEN_STATE: self._feature_embed(base),
+                tfgnn.HIDDEN_STATE: self._node_embed(base),
                 "acceleration": self._acc_embed(acc),
             }
 
-        def generic_embedding_fn(graph_piece, **kwargs):
-            features = graph_piece.get_features_dict()
-            if features:
-                return self._feature_embed(
-                    tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
-                )
-            return tfgnn.keras.layers.MakeEmptyFeature()(graph_piece)
+        def edge_embedding_fn(edge_set, **kwargs):
+            features = edge_set.get_features_dict()
+            return self._edge_embed(
+                tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
+            )
             
         self._encoder = tfgnn.keras.layers.MapFeatures(
-            context_fn=generic_embedding_fn,
             node_sets_fn=node_embedding_fn,
-            edge_sets_fn=generic_embedding_fn,
+            edge_sets_fn=edge_embedding_fn,
             name="input_embedding"
         )
 
@@ -74,7 +73,7 @@ class EncodeProcessDecode(tf.keras.Model):
                     extra_node_feature="acceleration",
                     reduce_type=reduce_type,
                     use_layer_normalization=True,
-                    next_state_layer=tfgnn.keras.layers.ResidualNextState
+                    # next_state_layer=tfgnn.keras.layers.ResidualNextState
                 )
             ]
         else:
@@ -90,7 +89,7 @@ class EncodeProcessDecode(tf.keras.Model):
                     extra_node_feature="acceleration",
                     reduce_type=reduce_type,
                     use_layer_normalization=True,
-                    next_state_layer=tfgnn.keras.layers.ResidualNextState
+                    # next_state_layer=tfgnn.keras.layers.ResidualNextState
                 )
                 for _ in range(self._num_bitwaves)
             ]
@@ -118,9 +117,13 @@ class EncodeProcessDecode(tf.keras.Model):
         logits_list = []
         rem = sum(self._bitwave_sizes)
         for bw_size, processor, decoder in zip(self._bitwave_sizes, self._processors, self._decoders):
-            latent_graph = latent_graph.replace_features(
-                node_sets={self._node_set_name: {"acceleration": self._acc_embed(acceleration)}}
-            )
+            node_set = latent_graph.node_sets[self._node_set_name]
+            latent_graph = latent_graph.replace_features(node_sets={
+                self._node_set_name: {
+                    tfgnn.HIDDEN_STATE: node_set[tfgnn.HIDDEN_STATE],
+                    "acceleration": self._acc_embed(acceleration),
+                }
+            })
             latent_graph = processor(latent_graph, training=training)
             logits = decoder(latent_graph, training=training)
             logits = tf.reshape(logits, (*acceleration.shape, self._bitqueue_range))

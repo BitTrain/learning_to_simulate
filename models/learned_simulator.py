@@ -326,13 +326,6 @@ class LearnedSimulator(tf.keras.Model):
         acceleration:   tf.Tensor,
         global_context: Optional[tf.Tensor]=None
     ) -> tfgnn.GraphTensor:
-        # --- Global features ---
-        context_stats = self._normalization_stats.get("context")
-        global_features = {
-            "global_context": (global_context - context_stats.mean) / 
-                tf.math.maximum(context_stats.std, SQRT_EPS[self.dtype])
-        } if global_context is not None else {}
-
         # --- Node features ---
         embedded_particle_type = self._particle_type_embedding(particle_type)
 
@@ -377,9 +370,19 @@ class LearnedSimulator(tf.keras.Model):
             "neighbor_distances": neighbor_distances,
         }
 
+        # --- Global features (broadcast to nodes) ---
+        context_stats = self._normalization_stats.get("context")
+        global_features = {
+            "global_context": tf.broadcast_to(
+                (global_context - context_stats.mean) / 
+                    tf.math.maximum(context_stats.std, SQRT_EPS[self.dtype]),
+                [num_particles, tf.shape(global_context)[-1]]
+            )
+        } if global_context is not None else {}
+        node_features.update(global_features)
+
         # --- Graph tensor ---
         graph = tfgnn.GraphTensor.from_pieces(
-            context=tfgnn.Context.from_fields(features=global_features),
             node_sets={
                 "particles": tfgnn.NodeSet.from_fields(
                     features=node_features,
