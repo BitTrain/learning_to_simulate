@@ -29,7 +29,10 @@ def sample_from_logits(
     """
     def _categorical(logits, temperature):
         logits = logits / tf.cast(temperature, logits.dtype)
-        return tf.random.categorical(logits, num_samples=1, dtype=dtype)[..., 0]
+        flat_logits = tf.reshape(logits, [-1, tf.shape(logits)[-1]])  # For `categorical`
+        indexes = tf.random.categorical(flat_logits, num_samples=1, dtype=dtype)
+        indexes = tf.reshape(indexes[..., 0], tf.shape(logits)[:-1])
+        return indexes
     def _greedy(logits):
         return tf.argmax(logits, axis=-1, output_type=dtype)
 
