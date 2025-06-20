@@ -10,7 +10,7 @@ from learning_to_simulate.models.graph_network import EncodeProcessDecode
 from learning_to_simulate.losses.bitwise_regression_loss import bitwise_regression_loss
 from learning_to_simulate.utils import bitqueue
 from learning_to_simulate import utils, settings
-from utils.data import SQRT_EPS, StatsPair
+from utils.data import SQRT_EPS, StatsPair, TF_NUMERIC_TO_INT
 
 
 class LearnedSimulator(tf.keras.Model):

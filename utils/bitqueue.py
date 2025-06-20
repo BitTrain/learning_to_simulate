@@ -78,7 +78,11 @@ def to_numeric(
     dtype:       tf.DType,
 ) -> tf.Tensor:
     shift = lead_bitpos - num_bits
-    shifted_bits = tf.bitwise.left_shift(bits, shift)
+    shifted_bits = tf.where(
+        shift >= 0,
+        tf.bitwise.left_shift(bits, shift),
+        tf.bitwise.right_shift(bits, -shift),
+    )
 
     numeric = tf.bitcast(shifted_bits, dtype)
 

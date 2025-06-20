@@ -126,7 +126,9 @@ class EncodeProcessDecode(tf.keras.Model):
             })
             latent_graph = processor(latent_graph, training=training)
             logits = decoder(latent_graph, training=training)
-            logits = tf.reshape(logits, (*acceleration.shape, self._bitqueue_range))
+            num_particles = tf.shape(acceleration)[0]
+            dims = tf.shape(acceleration)[1]
+            logits = tf.reshape(logits, (num_particles, dims, self._bitqueue_range))
             logits_list.append(logits)
             bits = bitqueue.sample_from_logits(logits, dtype=int_type)
             delta = bitqueue.to_numeric(bits, self._bitqueue_size, rem, dtype)
