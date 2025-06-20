@@ -25,11 +25,6 @@ class EncodeProcessDecode(tf.keras.Model):
     ):
         super().__init__(name=name)
 
-        self._context_embedding = mlp(latent_dim,
-                                      mlp_depth,
-                                      latent_dim,
-                                      use_layer_normalization=True,
-                                      name="context_embedding")
         self._node_embedding = mlp(latent_dim,
                                    mlp_depth,
                                    latent_dim,
@@ -57,7 +52,6 @@ class EncodeProcessDecode(tf.keras.Model):
             
         # MLP encoders
         self._encoder = tfgnn.keras.layers.MapFeatures(
-            context_fn=embedding_fn(self._context_embedding),
             node_sets_fn=embedding_fn(self._node_embedding),
             edge_sets_fn=embedding_fn(self._edge_embedding),
             name="input_embedding"
