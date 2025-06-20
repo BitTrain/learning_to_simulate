@@ -25,23 +25,41 @@ class EncodeProcessDecode(tf.keras.Model):
     ):
         super().__init__(name=name)
 
-        def embedding_fn(graph_piece, **kwargs):
-            """MLP embedding layer on concatenated features."""
-            features = graph_piece.get_features_dict()
-            if features:
-                return mlp(latent_dim, mlp_depth, latent_dim, use_layer_normalization=True)(
-                    tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
-                )
-            else:
-                tf.get_logger().warning(f"No features found in graph piece: {graph_piece}. "
-                                         "Falling back on MakeEmptyFeature.")
-                return tfgnn.keras.layers.MakeEmptyFeature()(graph_piece)
+        self._context_embedding = mlp(latent_dim,
+                                      mlp_depth,
+                                      latent_dim,
+                                      use_layer_normalization=True,
+                                      name="context_embedding")
+        self._node_embedding = mlp(latent_dim,
+                                   mlp_depth,
+                                   latent_dim,
+                                   use_layer_normalization=True,
+                                   name="node_embedding")
+        self._edge_embedding = mlp(latent_dim,
+                                   mlp_depth,
+                                   latent_dim,
+                                   use_layer_normalization=True,
+                                   name="edge_embedding")
+
+        def embedding_fn(embedding_layer):
+            def wrapper(graph_piece, **kwargs):
+                """Embedding on concatenated features."""
+                features = graph_piece.get_features_dict()
+                if features:
+                    return embedding_layer(
+                        tf.keras.layers.Concatenate()([v for _, v in sorted(features.items())])
+                    )
+                else:
+                    tf.get_logger().warning(f"No features found in graph piece: {graph_piece}. "
+                                            "Falling back on MakeEmptyFeature.")
+                    return tfgnn.keras.layers.MakeEmptyFeature()(graph_piece)
+            return wrapper
             
-        # Encoder with uniform embeddings
+        # MLP encoders
         self._encoder = tfgnn.keras.layers.MapFeatures(
-            context_fn=embedding_fn,
-            node_sets_fn=embedding_fn,
-            edge_sets_fn=embedding_fn,
+            context_fn=embedding_fn(self._context_embedding),
+            node_sets_fn=embedding_fn(self._node_embedding),
+            edge_sets_fn=embedding_fn(self._edge_embedding),
             name="input_embedding"
         )
 
