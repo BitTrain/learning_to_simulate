@@ -110,7 +110,7 @@ class LearnedSimulator(tf.keras.Model):
         positions = inputs["positions"]
         particle_type = inputs["particle_type"]
         global_context = inputs.get("global_context")
-        target_bits = inputs["target_bits"]
+        target_bits = inputs.get("target_bits")
 
         if settings.TF_DEBUG_MODE:
             self._check_tensor_inputs(positions, particle_type, global_context)
@@ -153,7 +153,7 @@ class LearnedSimulator(tf.keras.Model):
                     "particle_type": particle_type,
                     "global_context": global_context,
                     "target_bits": target_bits
-                },
+                },  
                 training=True
             )
             bq_combos = tf.range(1 << self._bitqueue_size, dtype=int_type)
