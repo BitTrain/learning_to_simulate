@@ -70,23 +70,23 @@ def from_numeric(
 
     return bitqueue_tensor
 
-@tf.function
-def to_numeric(
-    bits:        tf.Tensor,
-    num_bits:    int,
-    lead_bitpos: int,
-    dtype:       tf.DType,
-) -> tf.Tensor:
-    shift = lead_bitpos - num_bits
-    shifted_bits = tf.where(
-        shift >= 0,
-        tf.bitwise.left_shift(bits, shift),
-        tf.bitwise.right_shift(bits, -shift),
-    )
+# @tf.function
+# def to_numeric(
+#     bits:        tf.Tensor,
+#     num_bits:    int,
+#     lead_bitpos: int,
+#     dtype:       tf.DType,
+# ) -> tf.Tensor:
+#     shift = lead_bitpos - num_bits
+#     shifted_bits = tf.where(
+#         shift >= 0,
+#         tf.bitwise.left_shift(bits, shift),
+#         tf.bitwise.right_shift(bits, -shift),
+#     )
 
-    numeric = tf.bitcast(shifted_bits, dtype)
+#     numeric = tf.bitcast(shifted_bits, dtype)
 
-    return numeric
+#     return numeric
 
 @tf.function
 def is_zero(
@@ -175,4 +175,26 @@ if __name__ == "__main__":
     print(f">>> Extracting bitqueues of size {bitqueue_size}")
     bitqueue_tensor = from_numeric(tensor, bitwave_sizes, bitqueue_size)
     print_serialized_tf_tensor(bitqueue_tensor, bitwave_sizes)
+    print('')
+
+    print("~~~ [to_numeric] ~~~")
+    print("Example:")
+    rem = 32 - bitqueue_size
+    pi0 = tf.bitwise.left_shift(bitqueue_tensor[0], rem)
+    print(tf.bitcast(pi0, tf.float32).numpy())
+    print_serialized_tf_tensor(pi0)
+    rem = rem - bitwave_sizes[0]
+    pi01 = tf.bitwise.bitwise_or(
+        pi0,
+        tf.bitwise.left_shift(bitqueue_tensor[1], rem)
+    )
+    print(tf.bitcast(pi01, tf.float32).numpy())
+    print_serialized_tf_tensor(pi01)
+    rem = rem - bitwave_sizes[1]
+    pi012 = tf.bitwise.bitwise_or(
+        pi01,
+        tf.bitwise.left_shift(bitqueue_tensor[2], rem)
+    )
+    print(tf.bitcast(pi012, tf.float32).numpy())
+    print_serialized_tf_tensor(pi012)
     print('')
