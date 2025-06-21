@@ -118,7 +118,7 @@ class EncodeProcessDecode(tf.keras.Model):
         latent_graph = self._encoder(input_graph, training=training)
 
         logits_list = []
-        rem = sum(self._bitwave_sizes)
+        rem = sum(self._bitwave_sizes) - self._bitqueue_size
         for i, (bw_size, processor, decoder) in enumerate(zip(self._bitwave_sizes, self._processors, self._decoders)):
             node_set = latent_graph.node_sets[self._node_set_name]
             latent_graph = latent_graph.replace_features(node_sets={
@@ -134,11 +134,12 @@ class EncodeProcessDecode(tf.keras.Model):
             logits = tf.reshape(logits, (num_particles, dims, self._bitqueue_range))
             logits_list.append(logits)
             if training and target_bits is not None:
-                bits = tf.gather(target_bits, i, axis=-1)
+                delta_bits = tf.gather(target_bits, i, axis=-1)
             else:
-                bits = bitqueue.sample_from_logits(logits, dtype=int_type)
-            delta = bitqueue.to_numeric(bits, self._bitqueue_size, rem, dtype)
-            acceleration += delta
+                delta_bits = bitqueue.sample_from_logits(logits, dtype=int_type)
+            acc_bits = tf.bitcast(acceleration, int_type)  # For bitwise ops 
+            acc_bits = tf.bitwise.bitwise_or(acc_bits, tf.bitwise.left_shift(delta_bits, rem))  # Shift new bits in place
+            acceleration = tf.bitcast(acc_bits, dtype)  # Cast to new acceleration guess
             rem -= bw_size
         
         return acceleration, logits_list
